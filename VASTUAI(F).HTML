@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VASTU AI - Interactive House Planner</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .glassmorphism {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        #generate-btn.loading {
+            cursor: not-allowed;
+            background: #4a5568; /* gray-700 */
+        }
+    </style>
+</head>
+<body class="bg-slate-900 text-white antialiased">
+
+    <div class="container mx-auto p-4 md:p-8">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl md:text-5xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-amber-400 to-orange-500">VASTU AI</h1>
+            <p class="text-slate-400 mt-2">Your personal AI assistant for Vastu Shastra compliant house planning.</p>
+        </header>
+
+        <div class="flex flex-col lg:flex-row gap-8">
+
+            <!-- Control Panel -->
+            <div id="control-panel" class="w-full lg:w-1/3 glassmorphism rounded-2xl p-6 shadow-2xl">
+                <h2 class="text-2xl font-semibold mb-6 border-b border-slate-600 pb-3">1. Define Your Plot</h2>
+                
+                <div class="space-y-4">
+                    <div>
+                        <label for="plot-width" class="block text-sm font-medium text-slate-300 mb-1">Plot Width (in feet)</label>
+                        <input type="number" id="plot-width" value="30" class="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 focus:ring-2 focus:ring-amber-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label for="plot-length" class="block text-sm font-medium text-slate-300 mb-1">Plot Length (in feet)</label>
+                        <input type="number" id="plot-length" value="50" class="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 focus:ring-2 focus:ring-amber-500 focus:outline-none">
+                    </div>
+                    <div>
+                        <label for="plot-facing" class="block text-sm font-medium text-slate-300 mb-1">Plot Facing Direction</label>
+                        <select id="plot-facing" class="w-full bg-slate-800 border border-slate-600 rounded-lg p-2 focus:ring-2 focus:ring-amber-500 focus:outline-none">
+                            <option value="N">North</option>
+                            <option value="E" selected>East</option>
+                            <option value="S">South</option>
+                            <option value="W">West</option>
+                        </select>
+                    </div>
+                </div>
+
+                <h2 class="text-2xl font-semibold mt-8 mb-6 border-b border-slate-600 pb-3">2. Select Rooms</h2>
+                <div id="room-selection" class="grid grid-cols-2 gap-3 text-sm">
+                    <!-- Room checkboxes will be inserted here by JS -->
+                </div>
+
+                <button id="generate-btn" class="w-full mt-8 bg-gradient-to-r from-amber-500 to-orange-600 hover:from-amber-600 hover:to-orange-700 text-white font-bold py-3 px-4 rounded-lg shadow-lg transform hover:scale-105 transition-transform duration-300">
+                    Generate Vastu Plan
+                </button>
+            </div>
+
+            <!-- Display Area -->
+            <div class="w-full lg:w-2/3">
+                <div id="display-area" class="glassmorphism rounded-2xl p-6 shadow-2xl">
+                     <h2 class="text-2xl font-semibold mb-4 text-center">Generated House Plan</h2>
+                    <div class="relative aspect-auto bg-slate-800 rounded-lg p-4 border-2 border-slate-700">
+                        <canvas id="vastu-canvas"></canvas>
+                        <div id="direction-labels" class="absolute inset-0 pointer-events-none"></div>
+                         <div id="error-overlay" class="hidden absolute inset-0 bg-slate-900/80 flex items-center justify-center text-center p-4 rounded-lg">
+                            <p class="text-red-400 font-semibold"></p>
+                        </div>
+                    </div>
+                </div>
+                 <div id="report-area" class="mt-8 glassmorphism rounded-2xl p-6 shadow-2xl hidden">
+                    <h2 class="text-2xl font-semibold mb-4 border-b border-slate-600 pb-3">Vastu Compliance Report</h2>
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-medium">Compliance Score:</h3>
+                        <div id="compliance-score" class="text-3xl font-bold text-green-400">0%</div>
+                    </div>
+                    <div id="notes" class="space-y-2 text-sm"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            // --- UI ELEMENT REFERENCES ---
+            const roomSelectionDiv = document.getElementById('room-selection');
+            const generateBtn = document.getElementById('generate-btn');
+            const canvas = document.getElementById('vastu-canvas');
+            const ctx = canvas.getContext('2d');
+            const reportArea = document.getElementById('report-area');
+            const notesDiv = document.getElementById('notes');
+            const scoreDiv = document.getElementById('compliance-score');
+            const errorOverlay = document.getElementById('error-overlay');
+            const errorText = errorOverlay.querySelector('p');
+
+            // --- FRONTEND CONFIGURATION & DATA ---
+            const BACKEND_URL = 'http://127.0.0.1:5000/api/generate-plan';
+
+            const ZONES = {
+                'NW': { name: 'North-West', color: '#a7d7d8' }, 'N':  { name: 'North', color: '#90ee90' }, 'NE': { name: 'North-East', color: '#add8e6' },
+                'W':  { name: 'West', color: '#d3d3d3' }, 'C':  { name: 'Center', color: '#f5f5dc' }, 'E':  { name: 'East', color: '#fddde6' },
+                'SW': { name: 'South-West', color: '#d2b48c' }, 'S':  { name: 'South', color: '#ffcccb' }, 'SE': { name: 'South-East', color: '#ffb347' }
+            };
+            
+            const ALL_ROOMS = [
+                "Pooja Room", "Kitchen", "Master Bedroom", "Children's Bedroom", 
+                "Guest Bedroom", "Living Room", "Toilet", "Study Room", 
+                "Dining Area", "Staircase", "Cash Locker", "Garage"
+            ];
+
+            // --- INITIALIZATION ---
+            function initializeRooms() {
+                ALL_ROOMS.forEach(room => {
+                    const isChecked = ["Master Bedroom", "Kitchen", "Pooja Room", "Living Room", "Toilet"].includes(room);
+                    const checkboxHtml = `
+                        <label class="flex items-center space-x-2 cursor-pointer p-2 rounded-md hover:bg-slate-700 transition-colors">
+                            <input type="checkbox" value="${room}" class="form-checkbox h-4 w-4 rounded bg-slate-700 border-slate-500 text-amber-500 focus:ring-amber-500" ${isChecked ? 'checked' : ''}>
+                            <span>${room}</span>
+                        </label>
+                    `;
+                    roomSelectionDiv.innerHTML += checkboxHtml;
+                });
+            }
+
+            // --- CORE LOGIC (NOW HANDLED BY BACKEND) ---
+            async function getVastuPlanFromServer() {
+                const requiredRooms = Array.from(roomSelectionDiv.querySelectorAll('input:checked')).map(cb => cb.value);
+                const facingDirection = document.getElementById('plot-facing').value;
+
+                generateBtn.disabled = true;
+                generateBtn.classList.add('loading');
+                generateBtn.textContent = 'Generating...';
+                errorOverlay.classList.add('hidden');
+
+                try {
+                    const response = await fetch(BACKEND_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            rooms: requiredRooms,
+                            facing: facingDirection
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || `HTTP error! status: ${response.status}`);
+                    }
+
+                    const planData = await response.json();
+                    return planData;
+
+                } catch (error) {
+                    console.error("Error fetching from backend:", error);
+                    errorText.textContent = `Failed to connect to VASTU AI server. Please ensure the Python backend is running. (${error.message})`;
+                    errorOverlay.classList.remove('hidden');
+                    return null; // Indicate failure
+                } finally {
+                    generateBtn.disabled = false;
+                    generateBtn.classList.remove('loading');
+                    generateBtn.textContent = 'Generate Vastu Plan';
+                }
+            }
+
+            // --- DRAWING & DISPLAY ---
+            function drawPlan(planData) {
+                if (!planData || !planData.housePlan) return; // Don't draw if data is invalid
+                const { housePlan } = planData;
+                const plotWidth = parseFloat(document.getElementById('plot-width').value) || 30;
+                const plotLength = parseFloat(document.getElementById('plot-length').value) || 50;
+                
+                const parent = canvas.parentElement;
+                const canvasWidth = parent.clientWidth - 8; // Adjust for padding
+                const scale = canvasWidth / plotWidth;
+                const canvasHeight = plotLength * scale;
+                
+                canvas.width = canvasWidth;
+                canvas.height = canvasHeight;
+                
+                ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+                const zoneWidth = canvas.width / 3;
+                const zoneHeight = canvas.height / 3;
+                const zoneOrder = ['NW', 'N', 'NE', 'W', 'C', 'E', 'SW', 'S', 'SE'];
+                
+                zoneOrder.forEach((zone, i) => {
+                    const x = (i % 3) * zoneWidth;
+                    const y = Math.floor(i / 3) * zoneHeight;
+                    
+                    ctx.fillStyle = ZONES[zone].color;
+                    ctx.globalAlpha = 0.5;
+                    ctx.fillRect(x, y, zoneWidth, zoneHeight);
+                    ctx.globalAlpha = 1.0;
+                    ctx.strokeStyle = '#slate-500';
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(x, y, zoneWidth, zoneHeight);
+
+                    ctx.fillStyle = '#000000'; // Black text for better readability on light colors
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    
+                    const roomName = housePlan[zone];
+                    const fontSize = Math.min(14, zoneWidth / 9);
+                    ctx.font = `bold ${fontSize}px Inter`;
+                    
+                    const words = roomName.split(' ');
+                    if (words.length > 1) {
+                         ctx.fillText(words[0], x + zoneWidth / 2, y + zoneHeight / 2 - fontSize/2);
+                         ctx.fillText(words[1], x + zoneWidth / 2, y + zoneHeight / 2 + fontSize/2);
+                    } else {
+                         ctx.fillText(roomName, x + zoneWidth / 2, y + zoneHeight / 2);
+                    }
+                    
+                    ctx.font = `10px Inter`;
+                    ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+                    ctx.fillText(zone, x + zoneWidth / 2, y + 15);
+                });
+                drawDirectionLabels();
+            }
+            
+            function drawDirectionLabels() {
+                const facing = document.getElementById('plot-facing').value;
+                const labelContainer = document.getElementById('direction-labels');
+                labelContainer.innerHTML = ''; 
+
+                const allDirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+                const facingIndex = allDirs.indexOf(facing) * -1; // Get index for rotation
+                
+                const positions = {
+                    'N':  { top: '0px', left: '50%', transform: 'translate(-50%, -120%)' },
+                    'NE': { top: '0', right: '0', transform: 'translate(50%, -50%)' },
+                    'E':  { top: '50%', right: '0', transform: 'translate(120%, -50%)' },
+                    'SE': { bottom: '0', right: '0', transform: 'translate(50%, 50%)' },
+                    'S':  { bottom: '0', left: '50%', transform: 'translate(-50%, 120%)' },
+                    'SW': { bottom: '0', left: '0', transform: 'translate(-50%, 50%)' },
+                    'W':  { top: '50%', left: '0', transform: 'translate(-120%, -50%)' },
+                    'NW': { top: '0', left: '0', transform: 'translate(-50%, -50%)' }
+                };
+
+                const rotatedDirs = [...allDirs.slice(facingIndex), ...allDirs.slice(0, facingIndex)];
+                
+                Object.keys(positions).forEach((dir, i) => {
+                    const el = document.createElement('div');
+                    el.className = 'absolute text-sm font-semibold text-amber-400';
+                    el.style.top = positions[dir].top;
+                    el.style.bottom = positions[dir].bottom;
+                    el.style.left = positions[dir].left;
+                    el.style.right = positions[dir].right;
+                    el.style.transform = positions[dir].transform;
+                    el.textContent = rotatedDirs[i];
+                    labelContainer.appendChild(el);
+                });
+            }
+
+            function displayReport(planData) {
+                if (!planData) {
+                    reportArea.classList.add('hidden');
+                    return;
+                }
+                const { notes, complianceScore } = planData;
+                reportArea.classList.remove('hidden');
+                
+                scoreDiv.textContent = `${complianceScore}%`;
+                scoreDiv.className = `text-3xl font-bold ${
+                    complianceScore >= 75 ? 'text-green-400' : complianceScore >= 50 ? 'text-yellow-400' : 'text-red-400'
+                }`;
+                
+                notesDiv.innerHTML = '';
+                notes.forEach(note => {
+                    const noteColor = {
+                        success: 'border-green-500/50', info: 'border-blue-500/50',
+                        warning: 'border-yellow-500/50', error: 'border-red-500/50'
+                    };
+                    const icon = { success: '✅', info: 'ℹ️', warning: '⚠️', error: '❌' };
+                    notesDiv.innerHTML += `
+                        <div class="p-3 rounded-lg bg-slate-800/50 border-l-4 ${noteColor[note.type]}">
+                            <span class="mr-2">${icon[note.type]}</span>${note.text}
+                        </div>
+                    `;
+                });
+            }
+
+            // --- EVENT LISTENERS ---
+            generateBtn.addEventListener('click', async () => {
+                const planData = await getVastuPlanFromServer();
+                drawPlan(planData);
+                displayReport(planData);
+            });
+
+            // --- INITIAL RUN ---
+            initializeRooms();
+            generateBtn.click();
+        });
+    </script>
+</body>
+</html>
